@@ -7,12 +7,15 @@
 with lib; let
   cfg = config.plugins.rust-tools;
   helpers = import ../helpers.nix {inherit lib;};
+  lspHelpers = import ../lsp/helpers.nix {inherit pkgs config lib;};
 in {
   options.plugins.rust-tools =
     helpers.extraOptionsOptions
     // {
       enable = mkEnableOption "rust tools plugins";
+
       package = helpers.mkPackageOption "rust-tools" pkgs.vimPlugins.rust-tools-nvim;
+
       serverPackage = mkOption {
         type = types.package;
         default = pkgs.rust-analyzer;
@@ -124,13 +127,21 @@ in {
 
       server =
         helpers.mkCompositeOption "server"
-        ({
+        (
+          {
             standalone = helpers.defaultNullOpts.mkBool true ''
               standalone file support
               setting it to false may improve startup time
             '';
+
+            onAttach = lspHelpers.mkOnAttachOption "rust-analyzer on_attach behavior.";
           }
-          // (import ../lsp/language-servers/rust-analyzer-config.nix lib));
+          // (import ../lsp/language-servers/rust-analyzer-config.nix lib)
+        );
+
+      dap = helpers.mkCompositeOption "dap" {
+        adapter = helpers.mkNullOrOption (with types; either str attrs) "The dap adapter configuration.";
+      };
     };
   config = mkIf cfg.enable {
     extraPlugins = with pkgs.vimPlugins; [nvim-lspconfig cfg.package];
@@ -181,8 +192,26 @@ in {
           server = with cfg.server;
             helpers.ifNonNull' cfg.server {
               inherit standalone;
-              settings.rust-analyzer = lib.filterAttrs (n: v: n != "standalone") cfg.server;
-              on_attach = helpers.mkRaw "__lspOnAttach";
+              settings.rust-analyzer = lib.filterAttrs (n: v: n != "standalone" && n != "onAttach") cfg.server;
+              on_attach =
+                if onAttach == null
+                then "__lspOnAttach"
+                else
+                  (
+                    helpers.mkRaw ''
+                      function(client, bufnr)
+                        ${optionalString (!onAttach.override) config.plugins.lsp.onAttach}
+                        ${onAttach.function}
+                      end
+                    ''
+                  );
+            };
+          dap = with cfg.dap;
+            helpers.ifNonNull' cfg.dap {
+              adapter =
+                if isString adapter
+                then helpers.mkRaw adapter
+                else adapter;
             };
         }
         // cfg.extraOptions;

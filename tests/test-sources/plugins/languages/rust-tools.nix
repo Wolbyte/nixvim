@@ -47,6 +47,13 @@
       server = {
         standalone = true;
       };
+      dap = {
+        adapter = {
+          type = "executable";
+          command = "lldb-vscode";
+          name = "rt_lldb";
+        };
+      };
     };
   };
 }
